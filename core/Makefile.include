@@ -13,7 +13,8 @@ MCU = atmega328p
 OBJECTDIR = obj
 SOURCEDIRS += . ../../core ../../core/crypto
 
-CORE_SOURCEFILES += microvisor.c virt_i.S do_copy_data_lpm.S sha1-asm.S hmac-sha1.c string_boot.S 
+#CORE_SOURCEFILES += microvisor_original.c virt_i.S do_copy_data_lpm.S sha1-asm.S hmac-sha1.c string_boot.S
+CORE_SOURCEFILES += microvisor.c virt_i.S do_copy_data_lpm.S sha256-asm.S hmac-sha256.c string_boot.S 
 
 vpath %.c $(SOURCEDIRS)
 vpath %.S $(SOURCEDIRS)
@@ -39,8 +40,8 @@ LDFLAGS += -T ../../core/avr51_bootmem.x
 LDFLAGS += -Wl,--section-start=.bootloader=0x7000 # byte addres, word address = 0x3800
 CFLAGS += -DBOOTSIZE=4
 ### 8K bootloader
-##LDFLAGS += -Wl,--section-start=.bootloader=0x1E000 # byte addres, word address = 0xF000
-##CFLAGS += -DBOOTSIZE=8
+#LDFLAGS += -Wl,--section-start=.bootloader=0x1E000 # byte addres, word address = 0xF000
+#CFLAGS += -DBOOTSIZE=8
 
 oname = ${patsubst %.c,%.o,${patsubst %.S,%.o,$(1)}}
 soname = ${patsubst %.c,%.s.o,$(1)}
@@ -103,23 +104,44 @@ clean:
 distclean: clean
 
 
+#flash:
+#		avrdude -p $(MCU) -c jtag3isp -U flash:w:${BIN}.hex -P usb -B4 -F
+#
+#fuse1:
+#		avrdude -p $(MCU) -c jtag3isp -P usb -U lfuse:w:0xde:m -U hfuse:w:0xd5:m -U efuse:w:0xfd:m -U lock:w:0xFF:m
+#
+#fuse2:
+#		avrdude -p $(MCU) -c jtag3isp -P usb -U lfuse:w:0xde:m -U hfuse:w:0xd3:m -U efuse:w:0xfd:m -U lock:w:0xFF:m
+#
+#fuse4:
+#		avrdude -p $(MCU) -c jtag3isp -P usb -U lfuse:w:0xe2:m -U hfuse:w:0xd1:m -U efuse:w:0xfd:m -U lock:w:0xFF:m
+#
+#deploy:
+#		avrdude -p $(MCU) -c jtag3isp -U flash:w:${BIN}.bin -P usb -B4
+#
+#size:
+#		avr-size -A --mcu=${MCU} ${BIN}.elf
+#
+#read:
+#		avrdude -p $(MCU) -c jtag3isp -U flash:r:flash.bin:r -P usb -B4
+
 flash:
-		avrdude -p $(MCU) -c jtag3isp -U flash:w:${BIN}.hex -P usb -B4 -F
+		avrdude -p $(MCU) -c usbtiny -U flash:w:${BIN}.hex -B4 -F
 
 fuse1:
-		avrdude -p $(MCU) -c jtag3isp -P usb -U lfuse:w:0xde:m -U hfuse:w:0xd5:m -U efuse:w:0xfd:m -U lock:w:0xFF:m
+		avrdude -p $(MCU) -c usbtiny -U lfuse:w:0xde:m -U hfuse:w:0xd5:m -U efuse:w:0xfd:m -U lock:w:0xFF:m
 
 fuse2:
-		avrdude -p $(MCU) -c jtag3isp -P usb -U lfuse:w:0xde:m -U hfuse:w:0xd3:m -U efuse:w:0xfd:m -U lock:w:0xFF:m
+		avrdude -p $(MCU) -c usbtiny -U lfuse:w:0xde:m -U hfuse:w:0xd3:m -U efuse:w:0xfd:m -U lock:w:0xFF:m
 
 fuse4:
-		avrdude -p $(MCU) -c jtag3isp -P usb -U lfuse:w:0xe2:m -U hfuse:w:0xd1:m -U efuse:w:0xfd:m -U lock:w:0xFF:m
+		avrdude -p $(MCU) -c usbtiny -U lfuse:w:0xe2:m -U hfuse:w:0xd1:m -U efuse:w:0xfd:m -U lock:w:0xFF:m
 
 deploy:
-		avrdude -p $(MCU) -c jtag3isp -U flash:w:${BIN}.bin -P usb -B4
+		avrdude -p $(MCU) -c usbtiny -U flash:w:${BIN}.bin -B4
 
 size:
 		avr-size -A --mcu=${MCU} ${BIN}.elf
 
 read:
-		avrdude -p $(MCU) -c jtag3isp -U flash:r:flash.bin:r -P usb -B4
+		avrdude -p $(MCU) -c usbtiny -U flash:r:flash.bin:r -B4

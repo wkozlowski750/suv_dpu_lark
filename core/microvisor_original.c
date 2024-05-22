@@ -7,8 +7,7 @@
 #include <string.h>
 #include "bootloader_progmem.h"
 #include "mem_layout.h"
-// #include "hmac-sha1.h"
-#include "hmac-sha256.h"
+#include "hmac-sha1.h"
 #include "string_boot.h"
 
 /* Sets some ELF metadata (not strictly required) */
@@ -33,23 +32,13 @@ const uint16_t uvisor_entrypoints[] = {
     (uint16_t) &safe_reti,
     (uint16_t) &load_image,
     (uint16_t) &verify_activate_image,
-    (uint16_t) &parse_att_msg,
-    (uint16_t) &device_auth,
-    (uint16_t) &map_init,
+    (uint16_t) &remote_attestation,
     0x0000
 };
 
  BOOTLOADER_PROGMEM static const uint8_t key_hmac[] = {0x6e, 0x26, 0x88, 0x6e,
     0x4e, 0x07, 0x07, 0xe1, 0xb3, 0x0f, 0x24, 0x16, 0x0e, 0x99, 0xb9, 0x12,
-    0xe4, 0x61, 0xc4, 0x24, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-    0x01, 0x01, 0x01};
-
-// BOOTLOADER_PROGMEM uint8_t metadata[HASH_MAP_SIZE] = {0};
-// BOOTLOADER_PROGMEM uint16_t prover_id_map[HASH_MAP_SIZE] = {0};
-// BOOTLOADER_PROGMEM uint8_t prev_mem_state[32] = {0};
-// BOOTLOADER_SECTION uint16_t self_id = 1000;
-
-// BOOTLOADER_PROGMEM uint8_t mem_changed = 1;
+    0xe4, 0x61, 0xc4, 0x24};
 
 /****************************************************************************/
 /*                      MICROVISOR HELPER FUNCTIONS                         */
@@ -132,7 +121,7 @@ BOOTLOADER_SECTION static inline void
 load_key(uint8_t *buff, uint8_t *secret) {
   uint8_t i;
   // Read page byte at a time
-  for(i=0; i<32; i++) {
+  for(i=0; i<20; i++) {
     buff[i] = pgm_read_byte_near(secret +i);
   }
 }
@@ -274,10 +263,10 @@ BOOTLOADER_SECTION static inline uint8_t
 verify_hmac() {
   uint16_t image_size; //in BYTES
   uint8_t meta_size = 3; //in BYTES, without digest
-  uint8_t digest[32]; //HMAC_SHA1_BYTES
+  uint8_t digest[20]; //HMAC_SHA1_BYTES
 
   uint32_t offset = SHADOW;
-  hmac_sha256_ctx_t ctx;
+  hmac_sha1_ctx_t ctx;
   uint8_t buff[PAGE_SIZE*2]; //Twice pagesize to simplify hashing
 
   /* Init image_size variable */
@@ -288,16 +277,16 @@ verify_hmac() {
 
   /* Init hmac context with key (load 20 byte key temporary in buff) */
   load_key(buff,key_hmac);
-  hmac_sha256_init(&ctx, buff, 256);
+  hmac_sha1_init(&ctx, buff, 160);
 
   /* Hash full app pages first */
   while(image_size >= PAGE_SIZE) {
     read_page(buff, offset);
     /* Hash full page, unroll loop */
-    hmac_sha256_nextBlock(&ctx, buff);
-    hmac_sha256_nextBlock(&ctx, buff + HMAC_SHA256_BLOCK_BYTES);
-    hmac_sha256_nextBlock(&ctx, buff + HMAC_SHA256_BLOCK_BYTES*2);
-    hmac_sha256_nextBlock(&ctx, buff + HMAC_SHA256_BLOCK_BYTES*3);
+    hmac_sha1_nextBlock(&ctx, buff);
+    hmac_sha1_nextBlock(&ctx, buff + HMAC_SHA1_BLOCK_BYTES);
+    hmac_sha1_nextBlock(&ctx, buff + HMAC_SHA1_BLOCK_BYTES*2);
+    hmac_sha1_nextBlock(&ctx, buff + HMAC_SHA1_BLOCK_BYTES*3);
     /* Book keeping */
     image_size -= PAGE_SIZE;
     offset += PAGE_SIZE;
@@ -306,12 +295,12 @@ verify_hmac() {
   /* Hash last (semi)page + metadata */
   read_page(buff, offset);
   read_page(buff + image_size, SHADOW_META);
-  hmac_sha256_lastBlock(&ctx, buff, (image_size + meta_size)*8);
-  memcpy_boot(digest, buff+image_size+meta_size, 32); //Backup digest from metadata page
+  hmac_sha1_lastBlock(&ctx, buff, (image_size + meta_size)*8);
+  memcpy_boot(digest, buff+image_size+meta_size, 20); //Backup digest from metadata page
 
   /* Finalize + compare */
-  hmac_sha256_final(buff, &ctx);
-  if(memcmp_boot(buff, digest, 32) != 0)
+  hmac_sha1_final(buff, &ctx);
+  if(memcmp_boot(buff, digest, 20) != 0)
     return 0;
 
   return 1;
@@ -367,221 +356,39 @@ BOOTLOADER_SECTION void
 remote_attestation(uint8_t *mac) {
 
   
-//  uint8_t sreg;
-//  sreg = SREG;
-//  cli();
+ uint8_t sreg;
+ sreg = SREG;
+ cli();
 
- hmac_sha256_ctx_t ctx;
+ hmac_sha1_ctx_t ctx;
  uint8_t buff[PAGE_SIZE];
  uint32_t offset;
 
   // Init hmac context with key (load 20 byte key temporary in buff)
  load_key(buff,key_hmac);
  
- hmac_sha256_init(&ctx, buff, 256);
+ hmac_sha1_init(&ctx, buff, 160);
 
   // Hash full image
   offset = 0x00;
   while(offset < MEM_END) {
     read_page(buff, offset);
     // Run block through HMAC, unroll loop
-    hmac_sha256_nextBlock(&ctx, buff);
-    hmac_sha256_nextBlock(&ctx, buff + HMAC_SHA256_BLOCK_BYTES);
-    hmac_sha256_nextBlock(&ctx, buff + HMAC_SHA256_BLOCK_BYTES*2);
-    hmac_sha256_nextBlock(&ctx, buff + HMAC_SHA256_BLOCK_BYTES*3);
+    hmac_sha1_nextBlock(&ctx, buff);
+    hmac_sha1_nextBlock(&ctx, buff + HMAC_SHA1_BLOCK_BYTES);
+    hmac_sha1_nextBlock(&ctx, buff + HMAC_SHA1_BLOCK_BYTES*2);
+    hmac_sha1_nextBlock(&ctx, buff + HMAC_SHA1_BLOCK_BYTES*3);
     // Increment counter
     offset += 0x100;
   }
 
 
   // Hash nonce
-  hmac_sha256_lastBlock(&ctx, mac, 20*8); //20 byte nonce
+  hmac_sha1_lastBlock(&ctx, mac, 20*8); //20 byte nonce
 
   // Finalize
-  hmac_sha256_final(mac, &ctx); 
+  hmac_sha1_final(mac, &ctx); 
 
-  // SREG = sreg;
+  SREG = sreg;
 
-}
-
-
-BOOTLOADER_SECTION void att_resp(uint8_t *msg_buf, uint8_t *result_msg, uint8_t mem_changed, uint8_t *metadata, uint8_t *prev_mem_state) {
-  uint16_t ctr;
-  uint64_t nonce[2];
-  uint64_t att_resp_keyword = 0x6666666666666666;
-  uint16_t self_id = 1000;
-  uint8_t ver_mac[] = {0x02, 0x00, 0x00, 0x99, 0x99, 0x99};
-
-  for(uint16_t i = 0; i < HASH_MAP_SIZE; i++) {
-    metadata[i] = 0;
-  }
-
-  memcpy(&ctr, msg_buf + 22, 2);
-  memcpy(nonce, msg_buf + 24, 16);
-
-  uint8_t memory_state[32];
-  if(!mem_changed) {
-    memcpy(memory_state, prev_mem_state, 32);
-    goto att_skip;
-  }
-
-  remote_attestation(memory_state);
-
-att_skip:
-  memcpy(result_msg, ver_mac, 6);
-  memcpy(result_msg + 14, &self_id, 2);
-  memcpy(result_msg + 16, &ctr, 2);
-  memcpy(result_msg + 18, nonce, 16);
-  memcpy(result_msg + 34, &att_resp_keyword, 8);
-  memcpy(result_msg + 42, memory_state, 32);
-
-  hmac_sha256_ctx_t ctx;
-  uint8_t buff[PAGE_SIZE];
-  uint32_t offset;
-
-  // Init hmac context with key (load 20 byte key temporary in buff)
-  load_key(buff,key_hmac);
- 
-  hmac_sha256_init(&ctx, buff, 256);
-  hmac_sha256_nextBlock(&ctx, result_msg);
-  hmac_sha256_lastBlock(&ctx, result_msg + SHA256_BLOCK_BYTES, 80);
-  hmac_sha256_final(result_msg + 74, &ctx); 
-}
-
-BOOTLOADER_SECTION void status_update(uint8_t *msg_buf, uint8_t msg_length, uint8_t keyword, uint8_t *metadata) {
-
-  if(keyword == 3) {
-    for(uint8_t i = 0; i < HASH_MAP_SIZE; i++) {
-      metadata[i] = 1;
-    }
-    return;
-  }
-
-  uint8_t valid_list_array_size = (msg_length - 22) / 8;
-  // uint8_t valid_list_array_size = HASH_MAP_SIZE / 4;
-  uint64_t *valid_list_ptr = (uint64_t*)(msg_buf + 22);
-
-  if(keyword == 2) {
-    for(uint64_t i = 0; i < valid_list_array_size; i++) {
-      for(uint16_t j = 1; j < HASH_MAP_SIZE; j++) {
-        if(valid_list_ptr[i] & (1 << (j - 1))) {
-          metadata[j] = 1;
-        }
-      }
-    }
-    return;
-  } 
-  
-  for(uint64_t i = 0; i < valid_list_array_size; i++) {
-    for(uint16_t j = 1; j < HASH_MAP_SIZE; j++) {
-      if(*valid_list_ptr & (1 << (j - 1))) {
-        metadata[j] = 1;
-      } else {
-        metadata[j] &= 2;
-      }
-    }
-  }
-
-}
-
-BOOTLOADER_SECTION int8_t parse_att_msg(const uint8_t *msg, uint8_t msg_length, uint8_t *result_msg, uint8_t mem_changed, uint8_t *metadata, uint8_t *prev_mem_state) {
-  // uint8_t sreg;
-  // sreg = SREG;
-  // cli();
-
-  int8_t retval = 0;
-
-  uint64_t att_req_kwrd = 0x1111111111111111;
-  uint64_t status_update_kwrd = 0x2222222222222222;
-  uint64_t status_valid_kwrd = 0x3333333333333333;
-  uint64_t status_final_kwrd = 0x4444444444444444;
-  static const uint8_t verif_mac[] = {0x02, 0x00, 0x00, 0x99, 0x99, 0x99};
-
-  uint8_t msg_buf[100] = {0};
-  memcpy(msg_buf, msg, msg_length);
-
-  for(uint8_t i = 6; i < 12; i++) {
-    if (msg_buf[i] != verif_mac[i-6]) {
-        retval = -1;
-        goto end;
-    }
-  }
-
-  uint64_t *kwrd_ptr = (uint64_t*)(msg_buf + 14);
-
-  if(*kwrd_ptr == att_req_kwrd) {
-    att_resp(msg_buf, result_msg, mem_changed, metadata, prev_mem_state);
-    retval = 1;
-    goto end;
-  } else if(*kwrd_ptr == status_update_kwrd){
-    status_update(msg_buf, msg_length, 2, metadata);
-    retval = 2;
-    goto end;
-  } else if(*kwrd_ptr == status_valid_kwrd){
-    status_update(NULL, 0, 3, metadata);
-    retval = 3;
-    goto end;
-  } else if(*kwrd_ptr == status_final_kwrd){
-    status_update(msg_buf, msg_length, 4, metadata);
-    retval = 4;
-    goto end;
-  } else {
-    retval = -2;
-    goto end;
-  }
-
-end:
-  // SREG = sreg;
-  // sei();
-  return retval;
-}
-
-BOOTLOADER_SECTION uint16_t hash_mac_address(unsigned char* mac) {
-    unsigned int hash = 0;
-    for (int i = 0; i < 6; i++) {
-        hash = hash * 31 + mac[i];  // 31 is a small prime number
-    }
-    return hash % HASH_MAP_SIZE;
-}
-
-BOOTLOADER_SECTION int8_t device_auth(uint8_t *MAC, uint8_t *update_req_msg, uint8_t *metadata, uint16_t *prover_id_map) {
-  // uint8_t sreg = SREG;
-  // cli();
-
-  int8_t retval = 0;
-
-  uint64_t update_req_kwrd = 0x5555555555555555;
-  uint16_t id = prover_id_map[hash_mac_address(MAC)];
-  uint8_t meta = metadata[id];
-  static const uint8_t verif_mac[] = {0x02, 0x00, 0x00, 0x99, 0x99, 0x99};
-
-  if(meta & 1) {
-    retval = 1;
-    goto end;
-  } else if(meta & 2) {
-    goto end;
-  } else {
-    if(!(meta & 4)) {
-      memcpy(update_req_msg, verif_mac, 6);
-      memcpy(update_req_msg + 14, &update_req_kwrd, 8);
-      meta &= 4;
-    }
-  }
-
-end:
-  // SREG = sreg;
-  // sei();
-  return retval;
-}
-
-BOOTLOADER_SECTION void map_init(uint16_t *prover_id_map) {
-
-  uint8_t mac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x00};
-
-  for(uint16_t i = 0; i < HASH_MAP_SIZE; i++) {
-    uint16_t id = hash_mac_address(mac);
-    prover_id_map[id] = id;
-    uint16_t *last_bytes_ptr = (uint16_t*)(mac +  4);
-    *last_bytes_ptr++;
-  }
 }
